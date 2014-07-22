@@ -25,7 +25,7 @@ Exit the console
 Setup
 =====
 
-1. Symlink the minecraft file to `/etc/init.d/cuwo`, set the required premissions and update rc.d.
+1. Symlink the cuwo file to `/etc/init.d/cuwo`, set the required premissions and update rc.d.
 
 		sudo ln -s ~/cuwo-init/cuwo /etc/init.d/cuwo
 		chmod 755  ~/cuwo-init/cuwo
