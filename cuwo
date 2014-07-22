@@ -1,0 +1,430 @@
+#!/bin/bash
+# /etc/init.d/cuwo
+
+### BEGIN INIT INFO
+# Provides:   cuwo
+# Required-Start: $local_fs $remote_fs
+# Required-Stop:  $local_fs $remote_fs
+# Should-Start:   $network
+# Should-Stop:    $network
+# Default-Start:  2 3 4 5
+# Default-Stop:   0 1 6
+# Short-Description:    Cube World server
+# Description:    Init script for cuwo server.
+### END INIT INFO
+
+# Based upon minecraft-init by Ahtenus
+# Based on http://www.minecraftwiki.net/wiki/Server_startup_script
+# Modified to support the cuwo Cube World open-source server by alfonsojon
+
+# OS X doesn't support init.d scripts, so let's prevent running on OS X.
+# This assumes that everyone using Darwin is on OS X. Sorry, Darwin users!
+if [ `uname` == "Darwin" ]; then
+	echo "OS X is not currently supported."
+	exit 1
+fi
+
+# Loads config file
+
+if [ -L $0 ]
+then
+	source `readlink -e $0 | sed "s:[^/]*$:config:"`
+else
+	source `echo $0 | sed "s:[^/]*$:config:"`
+fi
+
+if [ "$SCREEN" == "" ]
+then
+	echo "Couldn't load config file, please edit config.example and rename it to config"
+	logger -t cuwo-init "Couldn't load config file, please edit config.example and rename it to config"
+	exit
+fi
+
+ME=`whoami`
+
+as_user() {
+	if [ $ME == $USERNAME ]; then
+		bash -c "$1"
+	else
+		su $USERNAME -s /bin/bash -c "$1"
+	fi
+}
+
+is_running() {
+	# Checks for the cuwo server screen session
+	# returns true if it exists.
+	pidfile=${CUWOPATH}/${SCREEN}.pid
+
+	if [ -f "$pidfile" ]
+	then
+		pid=$(head -1 $pidfile)
+		if ps ax | grep -v grep | grep ${pid} | grep "${SCREEN}" > /dev/null
+		then
+			return 0
+		else
+			if [ -z "$isInStop" ]
+			then
+				if [ -z "$roguePrinted" ]
+				then
+					roguePrinted=1
+					echo "Rogue pidfile found!"
+				fi
+			fi
+			return 1
+		fi
+	else
+		if ps ax | grep -v grep | grep "${SCREEN} ./run_server.sh" > /dev/null
+		then
+			echo "No pidfile found, but server's running."
+			echo "Re-creating the pidfile."
+
+			pid=$(ps ax | grep -v grep | grep "${SCREEN} ./run_server.sh" | cut -f1 -d' ')
+			check_permissions
+			as_user "echo $pid > $pidfile"
+
+			return 0
+		else
+			return 1
+		fi
+	fi
+}
+
+datepath() {
+	# datepath path filending-to-check returned-filending
+
+	# Returns an file path with added date between the filename and file ending.
+	# $1 filepath (not including file ending)
+	# $2 file ending to check for uniqueness
+	# $3 file ending to return
+
+	if [ -e $1`date +%F`$2 ]
+	then
+		echo $1`date +%FT%T`$3
+	else
+		echo $1`date +%F`$3
+	fi
+}
+
+cuwo_start() {
+	pidfile=${CUWOPATH}/${SCREEN}.pid
+	check_permissions
+
+	as_user "cd $CUWOPATH && screen -dmS bash ./run_server.sh"
+	as_user "screen -list | grep "\.$SCREEN" | cut -f1 -d'.' | head -n 1 | tr -d -c 0-9 > $pidfile"
+
+	#
+	# Waiting for the server to start
+	#
+	seconds=0
+	until is_running
+	do
+		sleep 1
+		seconds=$seconds+1
+		if [[ $seconds -eq 5 ]]
+		then
+			echo "Still not running, waiting a while longer..."
+		fi
+		if [[ $seconds -ge 120 ]]
+		then
+			echo "Failed to start, aborting."
+			exit 1
+		fi
+	done
+	echo "Server is running."
+}
+
+cuwo_command() {
+	if is_running
+	then
+			as_user "screen -p 0 -S $SCREEN -X eval '/stuff \"$(eval echo $FORMAT)\"\015'"
+	else
+			echo "$SERVICE was not running. Not able to run command."
+	fi
+}
+
+cuwo_say() {
+	if is_running
+	then
+		echo "Said: $1"
+		cuwo_command "[SERVER] $1"
+	else
+		echo "$SERVICE was not running. Not able to say anything."
+	fi
+}
+
+cuwo_stop() {
+	pidfile=${MCPATH}/${SCREEN}.pid
+	#
+	# Stops the server
+	#
+	sleep 10
+	echo "Stopping server..."
+	cuwo_command stop
+	sleep 0.5
+	#
+	# Waiting for the server to shut down
+	#
+	seconds=0
+	isInStop=1
+	while is_running
+	do
+		sleep 1
+		seconds=$seconds+1
+		if [[ $seconds -eq 3 ]]
+		then
+			echo "Still not shut down, waiting a while longer..."
+		fi
+		if [[ $seconds -ge 30 ]]
+		then
+			logger -t cuwo-init "Failed to shut down server, aborting."
+			echo "Failed to shut down, aborting."
+			exit 1
+		fi
+	done
+	as_user "rm $pidfile"
+	unset isInStop
+	is_running
+	echo "Server is now shut down."
+}
+
+check_backup_settings() {
+	case "$BACKUPFORMAT" in
+		tar)
+			COMPRESSCMD="tar -hcjf"
+			STORECMD="tar -cpf"
+			ARCHIVEENDING=".tar.bz2"
+			STOREDENDING=".tar"
+			EXCLUDEARG="-X "
+			;;
+		zip)
+			COMPRESSCMD="zip -rq"
+			STORECMD="zip -rq -0"
+			ARCHIVEENDING=".zip"
+			STOREDENDING=".zip"
+			EXCLUDEARG="-x@"
+			;;
+		*)
+			echo "$BACKUPFORMAT is not a supported backup format"
+			exit 1
+			;;
+	esac
+}
+
+cuwo_whole_backup() {
+	check_backup_settings
+	echo "backing up entire setup into $WHOLEBACKUP"
+	path=`datepath $WHOLEBACKUP/cuwo_`
+	locationOfScript=$(dirname "$(readlink -e "$0")")
+	as_user "mkdir -p $path"
+
+	if [ -r "$locationOfScript/exclude.list" ]
+	then
+		echo "...except the following files and/or dirs:"
+		cat $locationOfScript/exclude.list
+		exclude="$EXCLUDEARG$locationOfScript/exclude.list"
+	fi
+	if [ "$COMPRESS_WHOLEBACKUP" ]
+	then
+		as_user "$COMPRESSCMD $path/whole-backup$ARCHIVEENDING $CUWOPATH $exclude"
+	else
+		as_user "$STORECMD $path/whole-backup$STOREDENDING $CUWOPATH $exclude"
+	fi
+}
+
+cuwo_world_backup() {
+	#
+	# Backup the worlds and puts them in a folder for each day (unless $BACKUPSCRIPTCOMPATIBLE is set)
+	#
+
+	check_backup_settings
+	get_worlds
+	today="`date +%F`"
+	as_user "mkdir -p $BACKUPPATH"
+
+	# Check if the backup script compatibility is enabled
+	if [ "$BACKUPSCRIPTCOMPATIBLE" ]
+	then
+		# If it is enabled, then delete the old backups to prevent errors
+		echo "Detected that backup script compatibility is enabled, deleting old backups that are not necessary."
+		as_user "rm -r $BACKUPPATH/*"
+	fi
+
+	for INDEX in ${!WORLDNAME[@]}
+	do
+		echo "Backing up minecraft ${WORLDNAME[$INDEX]}"
+		if [ "$WORLDEDITCOMPATIBLE" ]
+		# If this is set tars will be created compatible to WorldEdit
+		then
+			as_user "mkdir -p $BACKUPPATH/${WORLDNAME[$INDEX]}"
+			path=`datepath $BACKUPPATH/${WORLDNAME[$INDEX]}/ $ARCHIVEENDING $ARCHIVEENDING`
+		elif [ "$BACKUPSCRIPTCOMPATIBLE" ]
+		# If is set tars will be put in $BACKUPPATH without any timestamp to be compatible with
+		# [backup rotation script](https://github.com/adamfeuer/rotate-backups)
+		then
+			path=$BACKUPPATH/${WORLDNAME[$INDEX]}$ARCHIVEENDING
+		else
+			as_user "mkdir -p $BACKUPPATH/${today}"
+			path=`datepath $BACKUPPATH/${today}/${WORLDNAME[$INDEX]}_ $ARCHIVEENDING $ARCHIVEENDING`
+		fi
+		as_user "$COMPRESSCMD $path $MCPATH/${WORLDNAME[$INDEX]}"
+	done
+}
+
+whitelist() {
+	mc_command "whitelist list"
+	sleep 1s
+	whitelist=$(tac $SERVERLOG | grep -m 1 "White-listed players:")
+
+	echo
+	echo "Currently there are the following players on your whitelist:"
+	echo
+	echo ${whitelist:49} | sed 's/, /\n/g'
+}
+
+get_script_location() {
+	echo $(dirname "$(readlink -e "$0")")
+}
+
+check_permissions() {
+	as_user "touch $pidfile"
+	if ! as_user "test -w '$pidfile'" ; then
+		echo "Check Permissions. Cannot write to $pidfile. Correct the permissions and then excute: $0 status"
+	fi
+}
+
+case "$1" in
+	start)
+		# Starts the server
+		if is_running; then
+			echo "Server already running."
+		else
+			cuwo_start
+		fi
+		;;
+	stop)
+		# Stops the server
+		if is_running; then
+			cuwo_say "SERVER SHUTTING DOWN!"
+			cuwo_stop
+			to_disk
+		else
+			echo "No running server."
+		fi
+		;;
+	restart)
+		# Restarts the server
+		if is_running; then
+			cuwo_say "SERVER REBOOT IN 10 SECONDS!"
+			cuwo_stop
+		else
+			echo "No running server, starting it..."
+		fi
+		cuwo_start
+		;;
+	backup)
+		# Backups world
+		if is_running; then
+			mc_say "Backing up world."
+			mc_saveoff
+			to_disk
+			mc_world_backup
+			mc_saveon
+			mc_say "Backup complete."
+		else
+			mc_world_backup
+		fi
+		;;
+	whole-backup)
+		# Backup everything
+		if is_running; then
+			cuwo_say "COMPLETE SERVER BACKUP IN 10 SECONDS.";
+			cuwo_say "WARNING: WILL RESTART SERVER SOFTWARE!"
+			cuwo_stop
+			cuwo_whole_backup
+			cuwo_start
+		else
+			cuwo_whole_backup
+		fi
+		;;
+	say)
+		# Says something to the ingame chat
+		if is_running; then
+			shift 1
+			cuwo_say "$*"
+		else
+			echo "No running server to say anything."
+		fi
+		;;
+	command)
+		if is_running; then
+			shift 1
+			cuwo_command "$*"
+			echo "Sent command: $*"
+		else
+			echo "No running server to send a command to."
+		fi
+		;;
+	log)
+		# Display server log using 'cat'.
+		cat $SERVERLOG
+		;;
+	status)
+		# Shows server status
+		if is_running
+		then
+			echo "$SERVICE is running."
+		else
+			echo "$SERVICE is not running."
+		fi
+		;;
+	screen)
+		if is_running; then
+			as_user "script /dev/null -q -c \"screen -rx $SCREEN\""
+		else
+		echo "Server is not running. Do you want to start it?"
+		echo "Please put \"Yes\", or \"No\": "
+		read START_SERVER
+		case "$START_SERVER" in
+			[Yy]|[Yy][Ee][Ss])
+				cuwo_start
+				as_user "script /dev/null -q -c \"screen -rx $SCREEN\""
+				;;
+			[Nn]|[Nn][Oo])
+				clear
+				echo "Aborting startup!"
+				sleep 1
+				clear
+				exit 1
+				;;
+			*)
+				clear
+				echo "Invalid input"
+				sleep 1
+				clear
+				exit 1
+				;;
+		esac
+		fi
+		;;
+	help|--help|-h)
+		echo "Usage: $0 COMMAND"
+		echo
+		echo "Available commands:"
+		echo -e "   start \t\t Starts the server"
+		echo -e "   stop \t\t Stops the server"
+		echo -e "   restart \t\t Restarts the server"
+		echo -e "   reload \t\t Reloads the server plugins"
+		echo -e "   backup \t\t Backups the worlds defined in the script"
+		echo -e "   whole-backup \t Backups the entire server folder"
+		echo -e "   log \t\t\t Prints the server log"
+		echo -e "   say \t\t\t Prints the given string to the ingame chat"
+		echo -e "   status \t\t Displays server status"
+		echo -e "   screen \t\t Shows the server screen"
+		;;
+	*)
+		echo "No such command, see $0 help"
+		exit 1
+		;;
+esac
+
+exit 0
