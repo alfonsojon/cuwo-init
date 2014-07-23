@@ -108,8 +108,7 @@ datepath() {
 cuwo_start() {
 	pidfile=${CUWOPATH}/${SCREEN}.pid
 	check_permissions
-
-	as_user "cd $CUWOPATH && screen -dmS bash ./run_server.sh"
+	as_user "cd $CUWOPATH && screen -dmS \"bash run_server.sh\""
 	as_user "screen -list | grep "\.$SCREEN" | cut -f1 -d'.' | head -n 1 | tr -d -c 0-9 > $pidfile"
 
 	#
