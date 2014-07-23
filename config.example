@@ -14,6 +14,7 @@ SCREEN="cuwo"
 USERNAME="cuwo"
 
 # Path to cuwo server directory
+# To get cuwo, see https://github.com/matpow2/cuwo
 CUWOPATH="/home/${USERNAME}/cuwo"
 
 # Where the worlds are located on the disk. Can not be the same as MCPATH.

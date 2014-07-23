@@ -153,7 +153,7 @@ cuwo_say() {
 }
 
 cuwo_stop() {
-	pidfile=${MCPATH}/${SCREEN}.pid
+	pidfile=${CUWOPATH}/${SCREEN}.pid
 	#
 	# Stops the server
 	#
@@ -241,44 +241,10 @@ cuwo_world_backup() {
 	today="`date +%F`"
 	as_user "mkdir -p $BACKUPPATH"
 
-	# Check if the backup script compatibility is enabled
-	if [ "$BACKUPSCRIPTCOMPATIBLE" ]
-	then
-		# If it is enabled, then delete the old backups to prevent errors
-		echo "Detected that backup script compatibility is enabled, deleting old backups that are not necessary."
-		as_user "rm -r $BACKUPPATH/*"
-	fi
-
-	for INDEX in ${!WORLDNAME[@]}
-	do
-		echo "Backing up minecraft ${WORLDNAME[$INDEX]}"
-		if [ "$WORLDEDITCOMPATIBLE" ]
-		# If this is set tars will be created compatible to WorldEdit
-		then
-			as_user "mkdir -p $BACKUPPATH/${WORLDNAME[$INDEX]}"
-			path=`datepath $BACKUPPATH/${WORLDNAME[$INDEX]}/ $ARCHIVEENDING $ARCHIVEENDING`
-		elif [ "$BACKUPSCRIPTCOMPATIBLE" ]
-		# If is set tars will be put in $BACKUPPATH without any timestamp to be compatible with
-		# [backup rotation script](https://github.com/adamfeuer/rotate-backups)
-		then
-			path=$BACKUPPATH/${WORLDNAME[$INDEX]}$ARCHIVEENDING
-		else
-			as_user "mkdir -p $BACKUPPATH/${today}"
-			path=`datepath $BACKUPPATH/${today}/${WORLDNAME[$INDEX]}_ $ARCHIVEENDING $ARCHIVEENDING`
-		fi
-		as_user "$COMPRESSCMD $path $MCPATH/${WORLDNAME[$INDEX]}"
-	done
-}
-
-whitelist() {
-	mc_command "whitelist list"
-	sleep 1s
-	whitelist=$(tac $SERVERLOG | grep -m 1 "White-listed players:")
-
-	echo
-	echo "Currently there are the following players on your whitelist:"
-	echo
-	echo ${whitelist:49} | sed 's/, /\n/g'
+	echo "Backing up the Cube World world.}"
+	as_user "mkdir -p $BACKUPPATH/${today}"
+	path=`datepath $BACKUPPATH/${today}/data}_ $ARCHIVEENDING $ARCHIVEENDING`
+	as_user "$COMPRESSCMD $path $CUWOPATH/data}"
 }
 
 get_script_location() {
@@ -304,7 +270,7 @@ case "$1" in
 	stop)
 		# Stops the server
 		if is_running; then
-			cuwo_say "SERVER SHUTTING DOWN!"
+			cuwo_say "Server shutting down."
 			cuwo_stop
 			to_disk
 		else
@@ -314,7 +280,7 @@ case "$1" in
 	restart)
 		# Restarts the server
 		if is_running; then
-			cuwo_say "SERVER REBOOT IN 10 SECONDS!"
+			cuwo_say "Server restarting in 10 seconds."
 			cuwo_stop
 		else
 			echo "No running server, starting it..."
@@ -324,21 +290,20 @@ case "$1" in
 	backup)
 		# Backups world
 		if is_running; then
-			mc_say "Backing up world."
-			mc_saveoff
-			to_disk
-			mc_world_backup
-			mc_saveon
-			mc_say "Backup complete."
+			cuwo_say "Complete backup begins in 10 seconds."
+			cuwo_say "Note: Server will restart for backup."
+			cuwo_stop
+			cuwo_world_backup
+			cuwo_start
 		else
-			mc_world_backup
+			cuwo_world_backup
 		fi
 		;;
 	whole-backup)
 		# Backup everything
 		if is_running; then
-			cuwo_say "COMPLETE SERVER BACKUP IN 10 SECONDS.";
-			cuwo_say "WARNING: WILL RESTART SERVER SOFTWARE!"
+			cuwo_say "Complete backup begins in 10 seconds."
+			cuwo_say "Note: Server will restart for backup."
 			cuwo_stop
 			cuwo_whole_backup
 			cuwo_start
@@ -366,7 +331,7 @@ case "$1" in
 		;;
 	log)
 		# Display server log using 'cat'.
-		cat $SERVERLOG
+		cat ${CUWOPATH}/logs/log.txt
 		;;
 	status)
 		# Shows server status
