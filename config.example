@@ -17,11 +17,6 @@ USERNAME="cuwo"
 # To get cuwo, see https://github.com/matpow2/cuwo
 CUWOPATH="/home/${USERNAME}/cuwo"
 
-# Where the worlds are located on the disk. Can not be the same as MCPATH.
-# You need to move your worlds to this directory manually, the script
-# will then handle the nessessay symlinks.
-WORLDSTORAGE="${CUWOPATH}/worlds"
-
 # Settings for backups
 # ==================================
 
